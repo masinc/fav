@@ -1,9 +1,10 @@
 use async_trait::async_trait;
 use clap::{Args, Parser, Subcommand};
 use normpath::PathExt;
+use tokio::fs;
 use std::{io, path::PathBuf, sync::Arc};
 
-use crate::State;
+use crate::{state::State, config};
 
 #[inline]
 fn normalize_path(path: &str) -> io::Result<String> {
@@ -46,6 +47,8 @@ pub struct Cli {
 
 #[derive(Debug, Subcommand)]
 pub enum Commands {
+    /// initialisze app 
+    Init(CommandInit),
     /// Add the path.
     #[command(visible_aliases = ["a"])]
     Add(CommandAdd),
@@ -70,6 +73,7 @@ impl Action for Commands {
     async fn run(&self, state: Arc<crate::State>) -> anyhow::Result<()> {
         use Commands::*;
         match self {
+            Init(_) => unreachable!(),
             Add(cmd) => cmd.run(state).await,
             Get(cmd) => cmd.run(state).await,
             Set(cmd) => cmd.run(state).await,
@@ -86,6 +90,45 @@ pub enum CommandType {
     Alias,
     /// Targeting Path
     Path,
+}
+
+#[derive(Debug, Args)]
+pub struct CommandInit {
+    /// Force initialization 
+    #[clap(long = "force", default_value_t = false)]
+    force: bool
+}
+
+
+impl CommandInit {
+    pub async fn init(&self) -> anyhow::Result<()> {
+
+        config::init_config()?;
+
+        'db: {
+            let db_path = config::db_path();
+            if !self.force && db_path.exists() {
+                eprintln!("\"{}\" already exists", db_path.display());
+                break 'db                
+            }
+
+            fs::remove_file(&db_path).await.or_else(|e| { 
+                if e.kind() == io::ErrorKind::NotFound {
+                    Ok(())
+                } else {
+                    Err(e)
+                }
+            })?;
+            
+            State::init().await?;
+            
+            eprintln!("\"{}\" initialized", db_path.display()) 
+        }
+
+        Ok(())
+
+
+    }
 }
 
 #[derive(Debug, Args)]
