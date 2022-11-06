@@ -1,10 +1,9 @@
 use async_trait::async_trait;
 use clap::{Args, Parser, Subcommand};
 use normpath::PathExt;
-use tokio::fs;
 use std::{io, path::PathBuf, sync::Arc};
-
-use crate::{state::State, config};
+use tokio::fs;
+use crate::{config, state::State};
 
 #[inline]
 fn normalize_path(path: &str) -> io::Result<String> {
@@ -34,6 +33,30 @@ async fn get_path(alias: &str, state: Arc<State>) -> Result<Option<String>, sqlx
     }
 }
 
+#[inline]
+async fn list_path(verbose: bool, state: Arc<State>) -> Result<Vec<String>, sqlx::Error> {
+    if !verbose {
+        let pathes: Vec<(String,)> = sqlx::query_as("SELECT path FROM favorites")
+            .fetch_all(&state.db_pool)
+            .await?;
+        Ok(pathes.into_iter().map(|(path,)| path).collect())
+    } else {
+        todo!()
+    }
+}
+
+#[inline]
+async fn list_alias(verbose: bool, state: Arc<State>) -> Result<Vec<String>, sqlx::Error> {
+    if !verbose {
+        let aliases: Vec<(String,)> = sqlx::query_as("SELECT name FROM aliases")
+            .fetch_all(&state.db_pool)
+            .await?;
+        Ok(aliases.into_iter().map(|(alias,)| alias).collect())
+    } else {
+        todo!()
+    }
+}
+
 #[async_trait]
 pub trait Action {
     async fn run(&self, state: Arc<crate::State>) -> anyhow::Result<()>;
@@ -47,7 +70,7 @@ pub struct Cli {
 
 #[derive(Debug, Subcommand)]
 pub enum Commands {
-    /// initialisze app 
+    /// initialisze app
     Init(CommandInit),
     /// Add the path.
     #[command(visible_aliases = ["a"])]
@@ -94,40 +117,36 @@ pub enum CommandType {
 
 #[derive(Debug, Args)]
 pub struct CommandInit {
-    /// Force initialization 
+    /// Force initialization
     #[clap(long = "force", default_value_t = false)]
-    force: bool
+    force: bool,
 }
-
 
 impl CommandInit {
     pub async fn init(&self) -> anyhow::Result<()> {
-
         config::init_config()?;
 
         'db: {
             let db_path = config::db_path();
             if !self.force && db_path.exists() {
                 eprintln!("\"{}\" already exists", db_path.display());
-                break 'db                
+                break 'db;
             }
 
-            fs::remove_file(&db_path).await.or_else(|e| { 
+            fs::remove_file(&db_path).await.or_else(|e| {
                 if e.kind() == io::ErrorKind::NotFound {
                     Ok(())
                 } else {
                     Err(e)
                 }
             })?;
-            
+
             State::init().await?;
-            
-            eprintln!("\"{}\" initialized", db_path.display()) 
+
+            eprintln!("\"{}\" initialized", db_path.display())
         }
 
         Ok(())
-
-
     }
 }
 
@@ -273,15 +292,35 @@ impl Action for CommandResolve {
 }
 
 #[derive(Debug, Args)]
-pub struct CommandList;
+pub struct CommandList {
+    /// Specify whether to list "Alias", "Path".
+    #[arg(name="type", short='t', long = "type", value_enum, default_value_t = CommandType::Path)]
+    _type: CommandType,
+
+    /// Verbose output
+    #[arg(short = 'v', long = "verbose")]
+    verbose: bool,
+}
 
 #[async_trait]
 impl Action for CommandList {
     async fn run(&self, state: Arc<crate::State>) -> anyhow::Result<()> {
-        let pathes: Vec<(String,)> = sqlx::query_as("SELECT path FROM favorites")
-            .fetch_all(&state.db_pool)
-            .await?;
-        pathes.iter().for_each(|(path,)| println!("{path}"));
+        use CommandType::*;
+        match self._type {
+            Path => {
+                list_path(self.verbose, state)
+                    .await?
+                    .into_iter()
+                    .for_each(|path| println!("{}", path));
+            }
+
+            Alias => {
+                list_alias(self.verbose, state)
+                    .await?
+                    .into_iter()
+                    .for_each(|alias| println!("{}", alias));
+            }
+        }
         Ok(())
     }
 }
