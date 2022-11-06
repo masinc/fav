@@ -1,9 +1,9 @@
+use crate::{config, db, state::State};
 use async_trait::async_trait;
 use clap::{Args, Parser, Subcommand};
 use normpath::PathExt;
 use std::{io, path::PathBuf, sync::Arc};
 use tokio::fs;
-use crate::{config, state::State};
 
 #[inline]
 fn normalize_path(path: &str) -> io::Result<String> {
@@ -12,49 +12,6 @@ fn normalize_path(path: &str) -> io::Result<String> {
         .as_path()
         .display()
         .to_string())
-}
-
-#[inline]
-async fn get_path(alias: &str, state: Arc<State>) -> Result<Option<String>, sqlx::Error> {
-    let id: Option<(i64,)> = sqlx::query_as("SELECT id FROM aliases WHERE name = ?")
-        .bind(alias)
-        .fetch_optional(&state.db_pool)
-        .await?;
-
-    if let Some((id,)) = id {
-        let (path,): (String,) = sqlx::query_as("SELECT path FROM favorites WHERE id = ?")
-            .bind(id)
-            .fetch_one(&state.db_pool)
-            .await?;
-
-        Ok(Some(path))
-    } else {
-        Ok(None)
-    }
-}
-
-#[inline]
-async fn list_path(verbose: bool, state: Arc<State>) -> Result<Vec<String>, sqlx::Error> {
-    if !verbose {
-        let pathes: Vec<(String,)> = sqlx::query_as("SELECT path FROM favorites")
-            .fetch_all(&state.db_pool)
-            .await?;
-        Ok(pathes.into_iter().map(|(path,)| path).collect())
-    } else {
-        todo!()
-    }
-}
-
-#[inline]
-async fn list_alias(verbose: bool, state: Arc<State>) -> Result<Vec<String>, sqlx::Error> {
-    if !verbose {
-        let aliases: Vec<(String,)> = sqlx::query_as("SELECT name FROM aliases")
-            .fetch_all(&state.db_pool)
-            .await?;
-        Ok(aliases.into_iter().map(|(alias,)| alias).collect())
-    } else {
-        todo!()
-    }
 }
 
 #[async_trait]
@@ -198,9 +155,10 @@ impl Action for CommandGet {
                     .fetch_all(&state.db_pool).await?;
                 aliases.iter().for_each(|(name,)| println!("{name}"));
             }
-            Path => match get_path(&self.value, Arc::clone(&state)).await? {
+
+            Path => match db::Alias::get_favorite_path(db::AliasArg::Name(&self.value), Arc::clone(&state)).await? {
                 Some(path) => println!("{}", path),
-                None => eprintln!("{} was not found", self.value),
+                None => eprintln!("\"{}\" could not be found", self.value),
             },
         }
         Ok(())
@@ -282,9 +240,9 @@ pub struct CommandResolve {
 impl Action for CommandResolve {
     async fn run(&self, state: Arc<crate::State>) -> anyhow::Result<()> {
         for name in self.names.iter() {
-            match get_path(name, Arc::clone(&state)).await? {
+            match db::Alias::get_favorite_path(db::AliasArg::Name(name), Arc::clone(&state)).await? {
                 Some(path) => println!("{}", path),
-                None => eprintln!("{} was not found", name),
+                None => eprintln!("\"{}\" could not be found", name),
             }
         }
         Ok(())
@@ -305,17 +263,16 @@ pub struct CommandList {
 #[async_trait]
 impl Action for CommandList {
     async fn run(&self, state: Arc<crate::State>) -> anyhow::Result<()> {
-        use CommandType::*;
         match self._type {
-            Path => {
-                list_path(self.verbose, state)
+            CommandType::Path => {
+                db::Favorite::list_path(self.verbose, state)
                     .await?
                     .into_iter()
                     .for_each(|path| println!("{}", path));
             }
 
-            Alias => {
-                list_alias(self.verbose, state)
+            CommandType::Alias => {
+                db::Alias::list_name(self.verbose, state)
                     .await?
                     .into_iter()
                     .for_each(|alias| println!("{}", alias));

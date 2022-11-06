@@ -338,6 +338,7 @@ dependencies = [
  "chrono",
  "clap",
  "dirs",
+ "itertools",
  "normpath",
  "serde",
  "serde_yaml",

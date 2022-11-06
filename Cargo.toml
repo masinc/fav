@@ -20,6 +20,7 @@ async-trait = "0.1"
 normpath = "0.3"
 thiserror = "1"
 dirs = "4"
+itertools = "0.10"
 
 [dependencies.sqlx]
 version = "0.6"
